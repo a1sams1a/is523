@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+
+import argparse
+import subprocess
+
+
+def execute(line):
+    p = subprocess.Popen(line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    output, err = p.communicate()
+    status = p.wait()
+    return status, err
+
+
+parser = argparse.ArgumentParser(prog='is_secure', description='TLS/SSL Security Test')
+parser.add_argument('--version', action='version', version='%(prog)s v0.1')
+parser.add_argument('--smtp', dest='is_smtp', action='store_true', help='test for smtp server')
+parser.add_argument('-p', dest='port', help='port to test (default: 443 or 25)')
+parser.add_argument('url', type=str, help='target url to test')
+
+args = parser.parse_args()
+
+if not args.port:
+    if args.is_smtp:
+        args.port = '25'
+    else:
+        args.port = '443'
+
+host = args.url + ':' + args.port
+
+print('Checking TLS/SSL security for ' + host)
+print('*Part 2. Logjam (CVE-2015-4000)')
+
+status, output = execute('openssl s_client -connect ' + host + ' -cipher "EXP" < Q')
+if 'handshake failure' in output:
+    print 'Not Vulnerable'
+else:
+    print '***VULNERABLE***'
+
+print
+
+print('*Part 4. POODLE (CVE-2014-3566)')
+
+status, output = execute('openssl s_client -connect ' + host + ' -ssl3 < Q')
+if 'handshake failure' in output:
+    print 'Not Vulnerable'
+else:
+    print '***VULNERABLE***'
+
+
