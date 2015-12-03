@@ -5,6 +5,7 @@ import subprocess
 import urllib2
 import time
 
+
 def execute(line):
     p = subprocess.Popen(line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     t = 0;
@@ -23,88 +24,112 @@ def execute(line):
     return stat, out, err
 
 
+def issecure(host, url):
+    result = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0, 10:0}
+
+    # PART1 - SSLv3 Connection Check
+    stat, out, err = execute('openssl s_client -connect ' + host + ' -ssl3 < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[1] = 1
+
+    # PART2 - TLS_FALLBACK_SCSV Check
+    stat, out, err = execute('openssl s_client -connect ' + host + ' -ssl3 -fallback_scsv < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[2] = 1
+
+    # PART3 - Public Key Size Check
+    stat, out, err = execute('openssl s_client -connect ' + host + ' < Q')
+    if 'public key is 1024 bit' in out or 'public key is 512 bit' in out:
+        result[3] = 1
+
+    # PART4 - MD5, SHA-1 Sign Check
+    stat, out, err = execute('openssl s_client -connect ' + host + ' < Q | openssl x509 -noout -text')
+    if 'Signature Algorithm: md5' in out or 'Signature Algorithm: sha1' in out:
+        result[4] = 1
+
+    # PART5 - FREAK Check
+    stat, out, err = execute('openssl s_client -cipher NULL,EXPORT,LOW -connect ' + host + ' < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[5] = 1
+
+    # PART6 - RC4 Check
+    stat, out, err = execute('openssl s_client -cipher RC4 -connect ' + host + ' < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[6] = 1
+
+    # PART7 - Client Renegoation Check
+    stat, out, err = execute('(echo "R"; sleep 5) | openssl s_client -connect ' + host + '')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out and err != 'TIME_OUT':
+        result[7] = 1
+
+    # PART 8 - CRIME Check
+    stat, out, err = execute('openssl s_client -connect ' + host + ' < Q')
+    if 'Compression: NONE' not in out:
+        result[8] = 1
+
+    # PART 9 - Heartbleed Check
+    stat, out, err = execute('~/.go/bin/Heartbleed ' + host)
+    if 'VULNERABLE' in err:
+        result[9] = 1
+    elif 'ERROR' in err:
+        result[9] = 9
+
+    # PART 10 - BREACH Check
+    req = urllib2.Request('https://' + url)
+    req.add_header('Accept-Encoding', 'compress, gzip')
+    try:
+        resp = urllib2.urlopen(req)
+        content = resp.read()
+        if 'html' not in content:
+            result[10] = 1
+    except:
+        pass
+
+    return result
+
+
+
 parser = argparse.ArgumentParser(prog='is_secure', description='TLS/SSL Security Test')
 parser.add_argument('--version', action='version', version='%(prog)s v0.1')
-parser.add_argument('--smtp', dest='is_smtp', action='store_true', help='test for smtp server')
-parser.add_argument('-p', dest='port', help='port to test (default: 443 or 25)')
-parser.add_argument('url', type=str, help='target url to test')
+parser.add_argument('-in', dest='input', help='input file name')
+parser.add_argument('-out', dest='output', help='output file name')
+parser.add_argument('-url', dest='url', help='target url to test')
 
 args = parser.parse_args()
 
-if not args.port:
-    if args.is_smtp:
-        args.port = '25'
-    else:
-        args.port = '443'
+if not args.input and not args.url:
+    print 'No target to test. Type --help for help'
+    exit()
 
-host = args.url + ':' + args.port
-result = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0, 10:0}
-
-
-# PART1 - SSLv3 Connection Check
-stat, out, err = execute('openssl s_client -connect ' + host + ' -ssl3 < Q')
-if 'handshake failure' not in err and 'New, (NONE)' not in out:
-    result[1] = 1
+targets = []
+if args.input:
+    with open(args.input) as f:
+        targets = f.read().splitlines()
+else:
+    targets = [args.url]
 
 
-# PART2 - TLS_FALLBACK_SCSV Check
-stat, out, err = execute('openssl s_client -connect ' + host + ' -ssl3 -fallback_scsv < Q')
-if 'handshake failure' not in err and 'New, (NONE)' not in out:
-    result[2] = 1
+if args.output:
+    fo = open(args.output, 'w')
+
+for url in targets:
+    if not url:
+        continue
+
+    host = url
+    if ':' not in url:
+        host += ':443'
+
+    secure = host + ' - '
+    result = issecure(host, url)
+    for k in result:
+        secure += str(result[k]) + ','
+
+    print secure
+    if args.output:
+        fo.write(secure + '\n')
 
 
-# PART3 - Public Key Size Check
-stat, out, err = execute('openssl s_client -connect ' + host + ' < Q')
-if 'public key is 1024 bit' in out or 'public key is 512 bit' in out:
-    result[3] = 1
 
 
-# PART4 - MD5, SHA-1 Sign Check
-stat, out, err = execute('openssl s_client -connect ' + host + ' < Q | openssl x509 -noout -text')
-if 'Signature Algorithm: md5' in out or 'Signature Algorithm: sha1' in out:
-    result[4] = 1
-
-
-# PART5 - FREAK Check
-stat, out, err = execute('openssl s_client -cipher NULL,EXPORT,LOW -connect ' + host + ' < Q')
-if 'handshake failure' not in err and 'New, (NONE)' not in out:
-    result[5] = 1
-
-
-# PART6 - RC4 Check
-stat, out, err = execute('openssl s_client -cipher RC4 -connect ' + host + ' < Q')
-if 'handshake failure' not in err and 'New, (NONE)' not in out:
-    result[6] = 1
-
-
-# PART7 - Client Renegoation Check
-stat, out, err = execute('(echo "R"; sleep 5) | openssl s_client -connect ' + host + '')
-if 'handshake failure' not in err and 'New, (NONE)' not in out and err != 'TIME_OUT':
-    result[7] = 1
-
-
-# PART 8 - CRIME Check
-stat, out, err = execute('openssl s_client -connect ' + host + ' < Q')
-if 'Compression: NONE' not in out:
-    result[8] = 1
-
-
-# PART 9 - Heartbleed Check
-stat, out, err = execute('~/.go/bin/Heartbleed ' + host)
-if 'VULNERABLE' in err:
-    result[9] = 1
-elif 'ERROR' in err:
-    result[9] = 9
-
-
-# PART 10 - BREACH Check
-req = urllib2.Request('https://' + args.url)
-req.add_header('Accept-Encoding', 'compress, gzip')
-resp = urllib2.urlopen(req)
-content = resp.read()
-if 'html' not in content:
-    result[10] = 1
-
-
-print result
 
