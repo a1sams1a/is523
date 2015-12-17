@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+
+import argparse
+import subprocess
+import urllib2
+import time
+
+
+def execute(line):
+    p = subprocess.Popen(line, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    t = 0;
+    while t < 10:
+        time.sleep(1)
+        if p.poll() is not None:
+            break
+        t += 1
+
+    if p.poll() is None:
+        p.kill()
+        return 'TIME_OUT', 'TIME_OUT', 'TIME_OUT'
+
+    out, err = p.communicate()
+    stat = p.wait()
+    return stat, out, err
+
+
+def issecure(host, url):
+    result = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0}
+
+    # PART0 - STARTTLS Support Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' < Q')
+    if 'unknown protocol' in err or err == 'TIME_OUT':
+        return result
+    result[0] = 1
+
+
+    # PART1 - SSLv3 Connection Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' -ssl3 < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[1] = 1
+
+    # PART2 - TLS_FALLBACK_SCSV Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' -ssl3 -fallback_scsv < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[2] = 1
+
+    # PART3 - Public Key Size Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' < Q')
+    if 'public key is 1024 bit' in out or 'public key is 512 bit' in out:
+        result[3] = 1
+
+    # PART4 - MD5, SHA-1 Sign Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' < Q | openssl x509 -noout -text')
+    if 'Signature Algorithm: md5' in out or 'Signature Algorithm: sha1' in out:
+        result[4] = 1
+
+    # PART5 - FREAK Check
+    stat, out, err = execute('openssl s_client -cipher NULL,EXPORT,LOW -starttls smtp -connect ' + host + ' < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[5] = 1
+
+    # PART6 - RC4 Check
+    stat, out, err = execute('openssl s_client -cipher RC4 -starttls smtp -connect ' + host + ' < Q')
+    if 'handshake failure' not in err and 'New, (NONE)' not in out:
+        result[6] = 1
+
+    # PART7 - Plaintext Command Injection Attack
+    stat, out, err = execute('../openssl/apps/openssl s_client -quiet -starttls smtp -connect ' + host + '')
+    if out.count('250') > 1:
+        result[7] = 1
+
+    # PART 8 - CRIME Check
+    stat, out, err = execute('openssl s_client -starttls smtp -connect ' + host + ' < Q')
+    if 'Compression: NONE' not in out:
+        result[8] = 1
+
+    return result
+
+
+
+parser = argparse.ArgumentParser(prog='issecure_starttls', description='STARTTLS Security Test')
+parser.add_argument('--version', action='version', version='%(prog)s v1.0')
+parser.add_argument('-in', dest='input', help='input file name')
+parser.add_argument('-out', dest='output', help='output file name')
+parser.add_argument('-url', dest='url', help='target url to test')
+
+args = parser.parse_args()
+
+if not args.input and not args.url:
+    print 'No target to test. Type --help for help'
+    exit()
+
+targets = []
+if args.input:
+    with open(args.input) as f:
+        targets = f.read().splitlines()
+else:
+    targets = [args.url]
+
+
+if args.output:
+    fo = open(args.output, 'w')
+
+for url in targets:
+    if not url:
+        continue
+
+    host = url
+    if ':' not in url:
+        host += ':25'
+
+    secure = host + ' - '
+    result = issecure(host, url)
+    for k in result:
+        secure += str(result[k]) + ','
+
+    print secure
+    if args.output:
+        fo.write(secure + '\n')
+
+if args.output:
+    fo.close()
+

@@ -89,8 +89,8 @@ def issecure(host, url):
 
 
 
-parser = argparse.ArgumentParser(prog='is_secure', description='TLS/SSL Security Test')
-parser.add_argument('--version', action='version', version='%(prog)s v0.1')
+parser = argparse.ArgumentParser(prog='issecure_https', description='HTTPS Security Test')
+parser.add_argument('--version', action='version', version='%(prog)s v1.0')
 parser.add_argument('-in', dest='input', help='input file name')
 parser.add_argument('-out', dest='output', help='output file name')
 parser.add_argument('-url', dest='url', help='target url to test')
@@ -129,7 +129,6 @@ for url in targets:
     if args.output:
         fo.write(secure + '\n')
 
-
-
-
+if args.output:
+    fo.close()
 
